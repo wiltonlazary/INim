@@ -7,31 +7,32 @@ type App = ref object
     nim: string
     srcFile: string
     showHeader: bool
+    flags: string
 
 var app: App
 
 const
-    INimVersion = "0.4.1"
+    INimVersion = "0.4.3"
     indentSpaces = "    "
     indentTriggers = [",", "=", ":", "var", "let", "const", "type", "import",
-                      "object", "enum"] # endsWith
+                      "object", "RootObj", "enum"] # endsWith
     embeddedCode = staticRead("inimpkg/embedded.nim") # preloaded code into user's session
 
 let
     uniquePrefix = epochTime().int
     bufferSource = getTempDir() & "inim_" & $uniquePrefix & ".nim"
 
-proc compileCode():auto =
+proc compileCode(): auto =
     # PENDING https://github.com/nim-lang/Nim/issues/8312, remove redundant `--hint[source]=off`
-    let compileCmd = fmt"{app.nim} compile --run --verbosity=0 --hints=off --hint[source]=off --path=./ {bufferSource}"
+    let compileCmd = fmt"{app.nim} compile --run --verbosity=0{app.flags} --hints=off --hint[source]=off --path=./ {bufferSource}"
     result = execCmdEx(compileCmd)
 
 var
     currentExpression = "" # Last stdin to evaluate
-    currentOutputLine = 0 # Last line shown from buffer's stdout
-    validCode = "" # All statements compiled succesfully
-    tempIndentCode = "" # Later append to `validCode` if whole block compiles well
-    indentLevel = 0 # Current
+    currentOutputLine = 0  # Last line shown from buffer's stdout
+    validCode = ""         # All statements compiled succesfully
+    tempIndentCode = ""    # Later append to `validCode` if whole block compiles well
+    indentLevel = 0        # Current
     previouslyIndented = false # Helper for showError(), indentLevel resets before showError()
     buffer: File
 
@@ -156,9 +157,9 @@ proc showError(output: string) =
         # To avoid char type conflict having single-quotes
         message[message.rfind("'")] = ';' # last single-quote
         let message_seq = message.split(";") # expression;type, e.g 'a';char
-        let typeExpression = message_seq[1] # type, e.g. char
+        let typeExpression = message_seq[1]                 # type, e.g. char
 
-        var shortcut:string
+        var shortcut: string
         when defined(Windows):
             shortcut = fmt"""
             stdout.write $({currentExpression})
@@ -217,7 +218,7 @@ proc init(preload = "") =
     else:
         bufferRestoreValidCode()
         # Imports display more of the stack trace in case of errors, instead of one liners error
-        currentExpression = "import "  # Pretend it was an import for showError()
+        currentExpression = "import " # Pretend it was an import for showError()
         showError(output)
         cleanExit(1)
 
@@ -226,7 +227,7 @@ proc getPromptSymbol(): string =
         result = "nim> "
         previouslyIndented = false
     else:
-        result =  ".... "
+        result = ".... "
     # Auto-indent (multi-level)
     result &= indentSpaces.repeat(indentLevel)
 
@@ -271,9 +272,11 @@ proc runForever() =
         if indentLevel != 0:
             # Skip indent for first line
             if currentExpression.hasIndentTrigger():
-                tempIndentCode &= indentSpaces.repeat(indentLevel-1) & currentExpression & "\n"
+                tempIndentCode &= indentSpaces.repeat(indentLevel-1) &
+                        currentExpression & "\n"
             else:
-                tempIndentCode &= indentSpaces.repeat(indentLevel) & currentExpression & "\n"
+                tempIndentCode &= indentSpaces.repeat(indentLevel) &
+                        currentExpression & "\n"
             continue
 
         # Compile buffer
@@ -282,7 +285,24 @@ proc runForever() =
         # Succesful compilation, expression is valid
         if status == 0:
             compilationSuccess(currentExpression, output)
+        # Maybe trying to echo value?
+        elif "has to be discarded" in output and indentLevel == 0: #
+            bufferRestoreValidCode()
 
+            # Save the current expression as an echo
+            currentExpression = "echo $" & currentExpression
+            buffer.writeLine(currentExpression)
+            buffer.flushFile()
+
+            let (echo_output, echo_status) = compileCode()
+            if echo_status == 0:
+                compilationSuccess(currentExpression, echo_output)
+            else:
+                # Show any errors in echoing the statement
+                indentLevel = 0
+                showError(echo_output)
+            # Roll back to not include the temporary echo line
+            bufferRestoreValidCode()
         # Compilation error
         else:
             # Write back valid code to buffer
@@ -300,13 +320,17 @@ proc initApp*() =
     app.srcFile = ""
     app.showHeader = true
 
-proc main(nim = "nim", srcFile = "", showHeader = true) =
+proc main(nim = "nim", srcFile = "", showHeader = true, flags: seq[string] = @[]) =
     ## inim interpreter
 
     initApp()
-    app.nim=nim
-    app.srcFile=srcFile
-    app.showHeader=showHeader
+    app.nim = nim
+    app.srcFile = srcFile
+    app.showHeader = showHeader
+    if flags.len > 0:
+        app.flags = " -d:" & join(@flags, " -d:")
+    else:
+        app.flags = ""
 
     if app.showHeader: welcomeScreen()
 
@@ -322,8 +346,9 @@ proc main(nim = "nim", srcFile = "", showHeader = true) =
 
 when isMainModule:
     import cligen
-    dispatch(main, help = {
+    dispatch(main, short = {"flags": 'd'}, help = {
             "nim": "path to nim compiler",
             "srcFile": "nim script to preload/run",
             "showHeader": "show program info startup",
+            "flags": "nim flags to pass to the compiler"
         })
