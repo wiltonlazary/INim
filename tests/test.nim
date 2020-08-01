@@ -1,20 +1,39 @@
+import unittest, osproc, strutils
+
 import inim
 
-# Initialize global var app; needed by getNimVersion.
-initApp()
-doAssert(getNimVersion()[0..2] == "Nim")
+suite "INim Test Suite":
 
-doAssert(hasIndentTrigger("var") == true)
-doAssert(hasIndentTrigger("var x:int") == false)
-doAssert(hasIndentTrigger("var x:int = 10") == false)
-doAssert(hasIndentTrigger("let") == true)
-doAssert(hasIndentTrigger("const") == true)
-doAssert(hasIndentTrigger("if foo == 1: ") == true)
-doAssert(hasIndentTrigger("proc fooBar(a, b: string): int = ") == true)
-doAssert(hasIndentTrigger("for i in 0..10:") == true)
-doAssert(hasIndentTrigger("for i in 0..10") == false)
-doAssert(hasIndentTrigger("import os, osproc,") == true)
-doAssert(hasIndentTrigger("import os, osproc, ") == true)
-doAssert(hasIndentTrigger("type") == true)
-doAssert(hasIndentTrigger("CallbackAction* = enum ") == true)
-doAssert(hasIndentTrigger("Response* = ref object ") == true)
+  setup:
+    initApp("nim", "", true)
+
+  teardown:
+    discard
+
+  test "Get Nim Version":
+    check:
+      getNimVersion()[0..2] == "Nim"
+
+  test "Indent triggers":
+    check:
+      hasIndentTrigger("var") == true
+      hasIndentTrigger("var x:int") == false
+      hasIndentTrigger("var x:int = 10") == false
+      hasIndentTrigger("let") == true
+      hasIndentTrigger("const") == true
+      hasIndentTrigger("if foo == 1: ") == true
+      hasIndentTrigger("proc fooBar(a, b: string): int = ") == true
+      hasIndentTrigger("for i in 0..10:") == true
+      hasIndentTrigger("for i in 0..10") == false
+      hasIndentTrigger("import os, osproc,") == true
+      hasIndentTrigger("import os, osproc, ") == true
+      hasIndentTrigger("type") == true
+      hasIndentTrigger("CallbackAction* = enum ") == true
+      hasIndentTrigger("Response* = ref object ") == true
+
+  test "Executes piped code from file":
+    check execCmdEx("cat tests/test_piping_file.nim | bin/inim").output.strip() == """4
+@[1, 5, 4]"""
+
+  test "Executes piped code from echo":
+    check execCmdEx("echo \"2+2\" | bin/inim").output.strip() == "4"
